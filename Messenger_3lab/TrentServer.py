@@ -47,7 +47,7 @@ class TrentServer:
 
         # Генерация сеансового ключа
         self.session_key = get_random_bytes(16)
-        self.log(f"[{self.current_time()}] Сессионный ключ сгенерирован: {
+        self.log(f"[{self.current_time()}] Сеансовый ключ сгенерирован: {
                  self.session_key.hex()}.\n")
 
         # Шифрование и отправка сеансового ключа Алисе
@@ -55,7 +55,7 @@ class TrentServer:
         encrypted_session_key = cipher_rsa.encrypt(self.session_key)
         self.alice_socket.send(encrypted_session_key)
         self.log(
-            f"[{self.current_time()}] Сессионный ключ отправлен клиенту 1.\n")
+            f"[{self.current_time()}] Сеансовый ключ отправлен клиенту 1.\n")
 
         # Шаг 2: Подключение Боба
         self.bob_socket, bob_address = self.server_socket.accept()
@@ -68,7 +68,7 @@ class TrentServer:
         encrypted_session_key_bob = cipher_rsa_bob.encrypt(self.session_key)
         self.bob_socket.send(encrypted_session_key_bob)
         self.log(
-            f"[{self.current_time()}] Сессионный ключ отправлен клиенту 2.\n")
+            f"[{self.current_time()}] Сеансовый ключ отправлен клиенту 2.\n")
 
         # Закрытие соединения с Алисой и Бобом
         self.alice_socket.close()

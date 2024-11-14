@@ -65,11 +65,11 @@ class Client:
     def receive_session_key(self):
         """Получение зашифрованного сеансового ключа от Трента"""
         encrypted_session_key = self.server_socket.recv(1024)
-        self.log(f"[{self.current_time()}] Зашифрованный сессионный ключ получен: {
+        self.log(f"[{self.current_time()}] Зашифрованный сеансовый ключ получен: {
                  encrypted_session_key.hex()}\n")
         cipher_rsa = PKCS1_OAEP.new(self.private_key)
         self.session_key = cipher_rsa.decrypt(encrypted_session_key)
-        self.log(f"[{self.current_time()}] Сессионный ключ расшифрован: {
+        self.log(f"[{self.current_time()}] сеансовый ключ расшифрован: {
                  self.session_key.hex()}\n")
 
     def start_listening(self):
@@ -107,7 +107,7 @@ class Client:
         self.start_listening()
 
     def send_message(self):
-        """Шифрование сообщения сессионным ключом и отправка"""
+        """Шифрование сообщения сеансовый ключом и отправка"""
         message = self.message_entry.get()
         cipher_aes = AES.new(self.session_key, AES.MODE_CBC)
         ct_bytes = cipher_aes.encrypt(pad(message.encode(), AES.block_size))
@@ -133,7 +133,7 @@ class Client:
         self.send_public_key()
         self.log(f"[{self.current_time()}] Открытый ключ отправлен Тренту.\n")
         self.receive_session_key()
-        self.log(f"[{self.current_time()}] Получен сессионный ключ.\n")
+        self.log(f"[{self.current_time()}] Получен сеансовый ключ.\n")
 
         # Пытаемся подключиться к другому клиенту
         self.connect_to_peer()
