@@ -1,88 +1,156 @@
-import tkinter as tk
-from tkinter import scrolledtext
+import sys
 import socket
-import os
-from cryptography.hazmat.primitives import hashes
-from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
-from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
-from cryptography.hazmat.backends import default_backend
+import random
+import time
+from PyQt5.QtWidgets import QApplication, QMainWindow, QTextEdit, QPushButton, QLineEdit, QVBoxLayout, QWidget
+from PyQt5.QtCore import QTimer
+
+# One-time pad encryption/decryption function
 
 
-class BobApp:
-    def __init__(self, root):
-        self.root = root
-        self.root.title("Bob")
+def one_time_pad_encrypt(message, key):
+    return ''.join(chr(ord(m) ^ ord(k)) for m, k in zip(message, key))
 
-        # Создаем интерфейс для логов
-        self.log = scrolledtext.ScrolledText(
-            root, width=50, height=20, state='disabled')
-        self.log.grid(row=0, column=0, padx=10, pady=10)
 
-        # Кнопка для подключения к Тренту и получения сессионного ключа
-        self.connect_button = tk.Button(
-            root, text="Connect to Trent", command=self.connect_to_trent)
-        self.connect_button.grid(row=1, column=0, padx=10, pady=10)
+def one_time_pad_decrypt(ciphertext, key):
+    # Encryption and decryption are the same in one-time pad
+    return one_time_pad_encrypt(ciphertext, key)
 
-    def log_message(self, message):
-        """Функция для добавления сообщений в лог интерфейса"""
-        self.log.configure(state='normal')
-        self.log.insert(tk.END, message + "\n")
-        self.log.configure(state='disabled')
 
-    def generate_key(self, password: str):
-        """Функция для генерации симметричного ключа на основе пароля"""
-        salt = os.urandom(16)
-        kdf = PBKDF2HMAC(
-            algorithm=hashes.SHA256(),
-            length=32,
-            salt=salt,
-            iterations=100000,
-            backend=default_backend()
-        )
-        return kdf.derive(password.encode()), salt
+class BobApp(QMainWindow):
+    def __init__(self):
+        super().__init__()
+        self.initUI()
+        self.K_B = ''.join(chr(random.randint(0, 255)) for _ in range(16))
+        self.session_key = None
+        self.log(f"Generated shared secret key K_B: {self.K_B}")
 
-    def decrypt_message(self, key, message):
-        """Функция для дешифрования сообщения с использованием AES"""
-        iv = message[:16]
-        cipher = Cipher(algorithms.AES(key), modes.CFB(iv),
-                        backend=default_backend())
-        decryptor = cipher.decryptor()
-        return decryptor.update(message[16:]) + decryptor.finalize()
+    def initUI(self):
+        self.central_widget = QWidget()
+        self.setCentralWidget(self.central_widget)
 
-    def connect_to_trent(self):
-        """Функция для подключения к Тренту и получения сессионного ключа"""
-        # Устанавливаем личный ключ Боба
-        bob_key, _ = self.generate_key("bob_secret")
+        layout = QVBoxLayout()
+        self.name_input = QLineEdit(self)
+        self.name_input.setPlaceholderText("Enter Bob's name")
+        layout.addWidget(self.name_input)
 
+        self.port_input = QLineEdit(self)
+        self.port_input.setPlaceholderText("Enter Bob's port")
+        layout.addWidget(self.port_input)
+
+        self.logs = QTextEdit(self)
+        self.logs.setReadOnly(True)
+        layout.addWidget(self.logs)
+
+        self.start_button = QPushButton('Start Bob', self)
+        self.start_button.clicked.connect(self.start_bob)
+        layout.addWidget(self.start_button)
+
+        self.central_widget.setLayout(layout)
+
+        self.setWindowTitle('Bob Application')
+        self.setGeometry(100, 100, 400, 300)
+
+    def log(self, message):
+        timestamp = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
+        self.logs.append(f"{timestamp} - {message}")
+
+    def start_bob(self):
+        self.name = self.name_input.text()
+        self.port = int(self.port_input.text())
+        self.log(f"Starting Bob with name: {self.name}, port: {self.port}")
+
+        # Set up server socket
+        self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.server_socket.bind(('localhost', self.port))
+        self.server_socket.listen(5)
+        self.log(f"Bob is listening for connections on port {self.port}")
+
+        self.bob_thread = QTimer()
+        self.bob_thread.timeout.connect(self.handle_connections)
+        self.bob_thread.start(1000)
+
+    def handle_connections(self):
         try:
-            # Подключение к серверу Трента
-            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-                sock.connect(('localhost', 5000))
+            client_socket, addr = self.server_socket.accept()
+            self.log(f"Connection from {addr}")
+            self.handle_client(client_socket)
+        except BlockingIOError:
+            pass  # No new connection, continue
 
-                # Отправка идентификатора Боба
-                sock.sendall(b"Bob")
-                self.log_message("Connected to Trent and sent identifier")
+    def handle_client(self, client_socket):
+        data = client_socket.recv(1024).decode()
+        if data:
+            self.log(f"Received from Alice: {data}")
 
-                # Получение зашифрованного сообщения от Трента
-                encrypted_data = sock.recv(1024)
+            # Decrypt message from Alice
+            decrypted_message = one_time_pad_decrypt(data, self.K_B)
+            self.log(f"Decrypted message: {decrypted_message}")
 
-                # Разделение данных: зашифрованное сообщение для Боба и Алисы
-                encrypted_for_bob = encrypted_data.split(b'||')[1]
+            parts = decrypted_message.split(',')
+            K, A = parts
+            self.log(f"Extracted K: {K}, A: {A}")
 
-                # Дешифровка сессионного ключа
-                decrypted_message = self.decrypt_message(
-                    bob_key, encrypted_for_bob)
-                session_key_hex, alice_id = decrypted_message.decode().split(',')
+            # Verify session key K
+            self.session_key = K
+            self.log(f"Session key K is valid.")
 
-                # Логирование сессионного ключа и идентификатора Алисы
-                self.log_message(f"Received session key: {session_key_hex}")
-                self.log_message(f"Session initiated with Alice")
+            # Generate random number R_B
+            R_B = random.randint(1, 10000)
+            self.log(f"Generated random number R_B: {R_B}")
 
-        except ConnectionError:
-            self.log_message("Failed to connect to Trent")
+            # Encrypt R_B with session key K
+            encrypted_R_B = one_time_pad_encrypt(str(R_B), self.session_key)
+            self.log(f"Sending encrypted R_B to Alice: {encrypted_R_B}")
+            client_socket.send(encrypted_R_B.encode())
+
+            # Receive encrypted R_B - 1 from Alice
+            encrypted_R_B_minus_1 = client_socket.recv(1024).decode()
+            self.log(
+                f"Received encrypted R_B - 1 from Alice: {encrypted_R_B_minus_1}")
+
+            # Decrypt R_B - 1
+            R_B_minus_1 = one_time_pad_decrypt(
+                encrypted_R_B_minus_1, self.session_key)
+            self.log(f"Decrypted R_B - 1: {R_B_minus_1}")
+
+            # Verify R_B - 1
+            if int(R_B_minus_1) == R_B - 1:
+                self.log("R_B - 1 is valid, session established.")
+            else:
+                self.log("R_B - 1 is invalid, aborting.")
+                client_socket.close()
+                return
+
+            # Start message exchange with Alice
+            self.start_message_exchange(client_socket)
+
+    def start_message_exchange(self, client_socket):
+        self.log("Starting message exchange with Alice...")
+        self.message_thread = QTimer()
+        self.message_thread.timeout.connect(
+            lambda: self.handle_messages(client_socket))
+        self.message_thread.start(1000)
+
+    def handle_messages(self, client_socket):
+        try:
+            data = client_socket.recv(1024).decode()
+            if data:
+                decrypted_message = one_time_pad_decrypt(
+                    data, self.session_key)
+                self.log(f"Received from Alice: {decrypted_message}")
+
+                # Echo the message back
+                encrypted_message = one_time_pad_encrypt(
+                    decrypted_message, self.session_key)
+                client_socket.send(encrypted_message.encode())
+                self.log(f"Sent to Alice: {decrypted_message}")
+        except BlockingIOError:
+            pass  # No new message, continue
 
 
-# GUI setup
-root = tk.Tk()
-app = BobApp(root)
-root.mainloop()
+if __name__ == '__main__':
+    app = QApplication(sys.argv)
+    bob_app = BobApp()
+    bob_app.show()
+    sys.exit(app.exec_())

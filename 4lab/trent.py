@@ -1,115 +1,125 @@
-import tkinter as tk
-from tkinter import scrolledtext
-import socket
-import os
+import sys
 import threading
-from cryptography.hazmat.primitives import hashes
-from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
-from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
-from cryptography.hazmat.backends import default_backend
+import socket
+import random
+import time
+from datetime import datetime
+from PyQt5.QtWidgets import (
+    QApplication, QMainWindow, QTextEdit, QVBoxLayout, QWidget, QLabel, QPushButton
+)
+from PyQt5.QtCore import Qt
 
 
-class TrentApp:
-    def __init__(self, root):
-        self.root = root
-        self.root.title("Trent - Authentication Server")
+# Encryption/Decryption with One-Time Pad
+def otp_encrypt_decrypt(message, key):
+    return ''.join(chr(ord(c) ^ ord(k)) for c, k in zip(message, key))
 
-        # Создаем интерфейс для логов
-        self.log = scrolledtext.ScrolledText(
-            root, width=50, height=20, state='disabled')
-        self.log.grid(row=0, column=0, padx=10, pady=10)
 
-        # Кнопка для запуска сервера
-        self.start_button = tk.Button(
-            root, text="Start Server", command=self.start_server_thread)
-        self.start_button.grid(row=1, column=0, padx=10, pady=10)
+class TrentApp(QMainWindow):
+    def __init__(self):
+        super().__init__()
+        self.init_ui()
+        self.server_socket = None
+        self.client_socket = None
+        self.shared_key_a = None
+        self.shared_key_b = None
+        self.logs = []
+
+    def init_ui(self):
+        self.setWindowTitle("Trent's Application")
+        self.setGeometry(100, 100, 600, 400)
+
+        self.central_widget = QWidget()
+        self.setCentralWidget(self.central_widget)
+        self.layout = QVBoxLayout(self.central_widget)
+
+        self.label = QLabel("Trent's Cryptographic Server", self)
+        self.label.setAlignment(Qt.AlignCenter)
+        self.layout.addWidget(self.label)
+
+        self.log_area = QTextEdit(self)
+        self.log_area.setReadOnly(True)
+        self.layout.addWidget(self.log_area)
+
+        self.start_button = QPushButton("Start Server", self)
+        self.start_button.clicked.connect(self.start_server_thread)
+        self.layout.addWidget(self.start_button)
 
     def log_message(self, message):
-        """Функция для добавления сообщений в лог интерфейса"""
-        self.log.configure(state='normal')
-        self.log.insert(tk.END, message + "\n")
-        self.log.configure(state='disabled')
-
-    def generate_key(self, password: str):
-        """Функция для генерации симметричного ключа на основе пароля"""
-        salt = os.urandom(16)
-        kdf = PBKDF2HMAC(
-            algorithm=hashes.SHA256(),
-            length=32,
-            salt=salt,
-            iterations=100000,
-            backend=default_backend()
-        )
-        return kdf.derive(password.encode()), salt
-
-    def encrypt_message(self, key, message):
-        """Функция для шифрования сообщения с использованием AES"""
-        iv = os.urandom(16)
-        cipher = Cipher(algorithms.AES(key), modes.CFB(iv),
-                        backend=default_backend())
-        encryptor = cipher.encryptor()
-        return iv + encryptor.update(message.encode()) + encryptor.finalize()
-
-    def decrypt_message(self, key, message):
-        """Функция для дешифрования сообщения с использованием AES"""
-        iv = message[:16]
-        cipher = Cipher(algorithms.AES(key), modes.CFB(iv),
-                        backend=default_backend())
-        decryptor = cipher.decryptor()
-        return decryptor.update(message[16:]) + decryptor.finalize()
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        log_entry = f"[{timestamp}] {message}"
+        self.logs.append(log_entry)
+        self.log_area.append(log_entry)
 
     def start_server_thread(self):
-        """Запуск сервера в отдельном потоке"""
-        thread = threading.Thread(target=self.start_server, daemon=True)
-        thread.start()
+        threading.Thread(target=self.start_server, daemon=True).start()
 
     def start_server(self):
-        """Основная функция сервера для приема подключений"""
-        # Генерация ключей для Алисы и Боба
-        alice_key, _ = self.generate_key("alice_secret")
-        bob_key, _ = self.generate_key("bob_secret")
+        try:
+            # Generate shared keys for Alice (K_A) and Bob (K_B)
+            self.shared_key_a = ''.join(random.choices(
+                'abcdefghijklmnopqrstuvwxyz', k=16))
+            self.shared_key_b = ''.join(random.choices(
+                'abcdefghijklmnopqrstuvwxyz', k=16))
+            self.log_message(f"Generated shared key for Alice (K_A): {
+                             self.shared_key_a}")
+            self.log_message(f"Generated shared key for Bob (K_B): {
+                             self.shared_key_b}")
 
-        # Запуск сервера
-        server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        server_socket.bind(('localhost', 5000))
-        server_socket.listen(2)
-        self.log_message("Trent is listening for connections...")
+            # Set up server socket
+            self.server_socket = socket.socket(
+                socket.AF_INET, socket.SOCK_STREAM)
+            self.server_socket.bind(('0.0.0.0', 12345))
+            self.server_socket.listen(1)
+            self.log_message("Server is listening on port 12345...")
 
-        while True:
-            conn, addr = server_socket.accept()
-            self.log_message(f"Connection from {addr}")
+            self.client_socket, addr = self.server_socket.accept()
+            self.log_message(f"Connection established with Alice: {addr}")
 
-            # Получение идентификатора клиента (Alice или Bob)
-            client_id = conn.recv(1024).decode()
-            if client_id == "Alice":
-                self.log_message("Identified connection as Alice")
+            # Receive message from Alice (A, B, R_A)
+            data = self.client_socket.recv(1024).decode()
+            self.log_message(f"Received from Alice: {data}")
+            alice_name, bob_name, r_a = data.split(',')
 
-                # Получаем зашифрованное сообщение от Алисы
-                data = conn.recv(1024)
-                decrypted_data = self.decrypt_message(alice_key, data)
-                self.log_message(f"Received decrypted data from Alice: {
-                                 decrypted_data.decode()}")
+            # Generate session key (K)
+            session_key = ''.join(random.choices(
+                'abcdefghijklmnopqrstuvwxyz', k=16))
+            self.log_message(f"Generated session key (K): {session_key}")
 
-                # Генерация сессионного ключа
-                session_key = os.urandom(32)
-                message_to_alice = f"{session_key.hex()},Bob"
-                encrypted_for_alice = self.encrypt_message(
-                    alice_key, message_to_alice)
-                encrypted_for_bob = self.encrypt_message(
-                    bob_key, f"{session_key.hex()},Alice")
+            # Prepare message for Bob
+            bob_message = otp_encrypt_decrypt(
+                f"{session_key},{alice_name}", self.shared_key_b)
 
-                # Отправка сессионного ключа Алисе
-                conn.sendall(encrypted_for_alice + b'||' + encrypted_for_bob)
-                self.log_message("Session key sent to Alice")
+            # Encrypt full message for Alice
+            alice_message = otp_encrypt_decrypt(
+                f"{r_a},{bob_name},{session_key},{
+                    bob_message}", self.shared_key_a
+            )
 
-            elif client_id == "Bob":
-                self.log_message("Identified connection as Bob")
-                # Здесь можно прописать дополнительные действия для Боба, если они требуются
+            # Send encrypted message to Alice
+            self.client_socket.send(alice_message.encode())
+            self.log_message(
+                f"Sent encrypted message to Alice: {alice_message}")
 
-            conn.close()
+            # Close connection
+            self.client_socket.close()
+            self.server_socket.close()
+            self.log_message("Server stopped.")
+
+        except Exception as e:
+            self.log_message(f"Error: {str(e)}")
+            if self.client_socket:
+                self.client_socket.close()
+            if self.server_socket:
+                self.server_socket.close()
 
 
-# GUI setup
-root = tk.Tk()
-app = TrentApp(root)
-root.mainloop()
+def main():
+    app = QApplication(sys.argv)
+    trent_app = TrentApp()
+    trent_app.show()
+    sys.exit(app.exec_())
+
+
+if __name__ == "__main__":
+    main()
