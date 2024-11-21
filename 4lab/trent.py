@@ -23,7 +23,7 @@ class TrentApp(QWidget):
         self.text_edit.setReadOnly(True)
         self.layout.addWidget(self.text_edit)
 
-        self.start_button = QPushButton('Start Listening', self)
+        self.start_button = QPushButton('Запустить Трент', self)
         self.start_button.clicked.connect(self.start_listening)
         self.layout.addWidget(self.start_button)
 
@@ -48,6 +48,7 @@ class TrentApp(QWidget):
         self.server_socket.bind(('localhost', 12345))
         self.server_socket.listen(1)
 
+        self.start_button.setEnabled(False)
         threading.Thread(target=self.accept_connection, daemon=True).start()
 
     def accept_connection(self):
