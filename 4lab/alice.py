@@ -10,6 +10,8 @@ K_A = b'1234567890123456'
 
 
 class AliceApp(QWidget):
+    log_signal = pyqtSignal(str)  # Signal to update the UI with messages
+
     def __init__(self):
         super().__init__()
 
@@ -41,6 +43,9 @@ class AliceApp(QWidget):
         self.session_key = None
         self.trent_socket = None
 
+        # Connect the signal to the log_message method
+        self.log_signal.connect(self.log_message)
+
     def log_message(self, message):
         timestamp = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())
         self.text_edit.append(f"[{timestamp}] {message}")
@@ -53,14 +58,14 @@ class AliceApp(QWidget):
         return self.otp_encrypt(key, data)
 
     def connect_to_trent(self):
-        self.log_message("Подключаюсь к Тренту...")
+        self.log_signal.emit("Подключаюсь к Тренту...")
         self.trent_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         try:
             self.trent_socket.connect(('localhost', 12345))  # Порт Трента
-            self.log_message("Подключен к Тренту")
+            self.log_signal.emit("Подключен к Тренту")
             return True
         except Exception as e:
-            self.log_message(f"Ошибка подключения к Тренту: {e}")
+            self.log_signal.emit(f"Ошибка подключения к Тренту: {e}")
             return False
 
     def send_message_to_trent(self):
@@ -73,7 +78,7 @@ class AliceApp(QWidget):
 
                 # Формируем сообщение
                 message = f"{A},{B},{R_A}"
-                self.log_message(f"Отправляю: {message}")
+                self.log_signal.emit(f"Отправляю: {message}")
 
                 try:
                     # Отправка сообщения без шифрования
@@ -81,7 +86,7 @@ class AliceApp(QWidget):
 
                     # Ждём ответ от Трента
                     data = self.trent_socket.recv(1024)
-                    self.log_message(f"Получено от Трента: {
+                    self.log_signal.emit(f"Получено от Трента: {
                                      data.decode('utf-8')}")
 
                     # Обработка ответа
@@ -91,10 +96,10 @@ class AliceApp(QWidget):
                         f"Проблема отправки/получения от Трента: {e}")
                 finally:
                     self.trent_socket.close()
-                    self.log_message("Соединение с Трентом закрыто.")
+                    self.log_signal.emit("Соединение с Трентом закрыто.")
                     self.connect_to_bob()
             else:
-                self.log_message("Ошибка подключения к Тренту.")
+                self.log_signal.emit("Ошибка подключения к Тренту.")
 
         # Запуск процесса отправки в отдельном потоке
         threading.Thread(target=worker, daemon=True).start()
@@ -105,10 +110,10 @@ class AliceApp(QWidget):
         # Шаг 1: Декодируем сообщение от Трента из base64
         try:
             decoded_data = base64.b64decode(data).decode('utf-8')
-            self.log_message(
+            self.log_signal.emit(
                 f"Получено от Трента (декодировано из base64): {decoded_data}")
         except Exception as e:
-            self.log_message(f"Ошибка декодирования из base64: {e}")
+            self.log_signal.emit(f"Ошибка декодирования из base64: {e}")
             return
 
         # Шаг 2: Расшифровываем сообщение с использованием OTP и ключа K_A
@@ -116,24 +121,24 @@ class AliceApp(QWidget):
             decrypted_msg = self.otp_decrypt(K_A, decoded_data)
             decrypted_msg_str = decrypted_msg.decode(
                 'utf-8')  # Преобразуем байты в строку
-            self.log_message(f"Расшифровано при помощи K_A: {
+            self.log_signal.emit(f"Расшифровано при помощи K_A: {
                              decrypted_msg_str}")
         except Exception as e:
-            self.log_message(
+            self.log_signal.emit(
                 f"Ошибка расшифровки сообщения с использованием K_A: {e}")
             return
 
         # Шаг 3: Извлекаем компоненты сообщения: R_A, B, K, зашифрованное сообщение для Боба
         try:
             R_A, B, K, encrypted_msg_1_base64 = decrypted_msg_str.split(',')
-            self.log_message(f"R_A: {R_A}, B: {B}, K: {
+            self.log_signal.emit(f"R_A: {R_A}, B: {B}, K: {
                 K}, Зашифрованное сообщение для Боба: {encrypted_msg_1_base64}")
         except Exception as e:
-            self.log_message(f"Ошибка извлечения данных из сообщения: {e}")
+            self.log_signal.emit(f"Ошибка извлечения данных из сообщения: {e}")
             return
 
     def send_to_bob(self, K, A):
-        self.log_message("Отправляю сообщение Бобу с сеансовым ключом K.")
+        self.log_signal.emit("Отправляю сообщение Бобу с сеансовым ключом K.")
         self.bob_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.bob_socket.connect(('localhost', 12347))
 
@@ -145,14 +150,14 @@ class AliceApp(QWidget):
     def connect_to_bob(self):
         """Метод для подключения к Бобу на порт 12346, выполняется в потоке."""
         def worker():
-            self.log_message("Подключаюсь к Бобу на порт 12346...")
+            self.log_signal.emit("Подключаюсь к Бобу на порт 12346...")
 
             self.bob_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             try:
                 self.bob_socket.connect(('localhost', 12346))  # Порт Боба
-                self.log_message("Подключено к Бобу.")
+                self.log_signal.emit("Подключено к Бобу.")
             except Exception as e:
-                self.log_message(f"Ошибка подключения к Бобу: {e}")
+                self.log_signal.emit(f"Ошибка подключения к Бобу: {e}")
 
         # Запуск потока для подключения
         connection_thread = threading.Thread(target=worker, daemon=True)
@@ -170,17 +175,17 @@ class AliceApp(QWidget):
 
                     # Преобразуем данные в строку
                     decoded_data = base64.b64decode(data).decode('utf-8')
-                    self.log_message(
+                    self.log_signal.emit(
                         f"Получено сообщение от Боба: {decoded_data}")
 
                     # Расшифровываем сообщение, если сессионный ключ доступен
                     decrypted_message = self.otp_decrypt(
                         self.session_key.encode('utf-8'), decoded_data.encode('utf-8'))
-                    self.log_message(f"Расшифрованное сообщение: {
+                    self.log_signal.emit(f"Расшифрованное сообщение: {
                         decrypted_message}")
 
                 except Exception as e:
-                    self.log_message(
+                    self.log_signal.emit(
                         f"Ошибка получения сообщения от Боба: {e}")
                     break
 
@@ -196,10 +201,10 @@ class AliceApp(QWidget):
                     self.bob_socket.connect(('localhost', 12347))
                     self.bob_socket.send(base64.b64encode(
                         encrypted_message).decode('utf-8').encode('utf-8'))
-                    self.log_message(
+                    self.log_signal.emit(
                         f"Отправлено зашифрованное сообщение Бобу: {message}")
                 except Exception as e:
-                    self.log_message(
+                    self.log_signal.emit(
                         f"Ошибка при отправке сообщения Бобу: {e}")
                 finally:
                     self.bob_socket.close()
