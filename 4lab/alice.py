@@ -1,164 +1,206 @@
 import sys
 import socket
 import random
-import time
-from PyQt5.QtWidgets import QApplication, QMainWindow, QTextEdit, QPushButton, QLineEdit, QVBoxLayout, QWidget
-from PyQt5.QtCore import QTimer
+import threading
+from PyQt5.QtWidgets import QApplication, QMainWindow, QTextEdit, QPushButton, QVBoxLayout, QWidget
+from PyQt5.QtCore import QThread, pyqtSignal
+from datetime import datetime
 
-# One-time pad encryption/decryption function
+# Utility functions
+
+
+def log_message(log_widget, message):
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    log_widget.append(f"[{timestamp}] {message}")
+
+
+def generate_large_prime():
+    # Simple large prime generation (for demonstration purposes)
+    return random.choice([101, 103, 107, 109, 113, 127, 131, 137, 139, 149])
+
+
+def mod_exp(base, exp, mod):
+    """Perform modular exponentiation."""
+    return pow(base, exp, mod)
 
 
 def one_time_pad_encrypt(message, key):
-    return ''.join(chr(ord(m) ^ ord(k)) for m, k in zip(message, key))
+    """Encrypt a message using a one-time pad."""
+    return ''.join(chr(ord(c) ^ key[i % len(key)]) for i, c in enumerate(message))
 
 
 def one_time_pad_decrypt(ciphertext, key):
-    # Encryption and decryption are the same in one-time pad
+    """Decrypt a message using a one-time pad."""
     return one_time_pad_encrypt(ciphertext, key)
+
+# Alice's Client Class
+
+
+class AliceClient(QThread):
+    log_signal = pyqtSignal(str)
+
+    def __init__(self):
+        super().__init__()
+        self.shared_key = None
+        self.session_key = None
+
+    def run(self):
+        # Connect to Trent and generate a shared key using Diffie-Hellman
+        self.connect_to_trent()
+        # Proceed with the Needham-Schroeder protocol
+        self.run_needham_schroeder()
+
+    def connect_to_trent(self):
+        try:
+            self.log_signal.emit(
+                "Connecting to Trent for Diffie-Hellman key exchange...")
+            trent_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            trent_socket.connect(("127.0.0.1", 65432))
+
+            # Receive n, g, and Trent's public key
+            data = trent_socket.recv(1024).decode()
+            n, g, trent_public_key = map(int, data.split(","))
+            self.log_signal.emit(f"Received n={n}, g={
+                                 g}, Trent's public key={trent_public_key}")
+
+            # Generate Alice's private and public keys
+            private_key = random.randint(2, n - 2)
+            public_key = mod_exp(g, private_key, n)
+            self.log_signal.emit(
+                f"Alice's private key generated. Public key={public_key}")
+
+            # Send Alice's public key to Trent
+            trent_socket.send(str(public_key).encode())
+            self.log_signal.emit("Sent public key to Trent.")
+
+            # Compute shared key
+            self.shared_key = mod_exp(trent_public_key, private_key, n)
+            self.log_signal.emit(
+                f"Computed shared key with Trent: {self.shared_key}")
+
+            trent_socket.close()
+        except Exception as e:
+            self.log_signal.emit(f"Error during Diffie-Hellman: {e}")
+
+    def run_needham_schroeder(self):
+        try:
+            self.log_signal.emit(
+                "Starting Needham-Schroeder protocol with Trent...")
+            trent_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            trent_socket.connect(("127.0.0.1", 65432))
+
+            # Step 1: Send A, B, RA to Trent
+            alice_name = "Alice"
+            bob_name = "Bob"
+            ra = random.randint(1, 1000000)
+            message = f"{alice_name},{bob_name},{ra}"
+            self.log_signal.emit(
+                f"Step 1: Sending message to Trent: {message}")
+            trent_socket.send(message.encode())
+
+            # Step 2: Receive encrypted response from Trent
+            encrypted_message = trent_socket.recv(1024)
+            self.log_signal.emit(f"Received encrypted response from Trent: {
+                                 encrypted_message}")
+
+            # Decrypt message using shared key
+            try:
+                # Ensure proper decoding
+                encrypted_message = encrypted_message.decode()
+                decrypted_message = one_time_pad_decrypt(
+                    encrypted_message, [self.shared_key])
+                self.log_signal.emit(f"Decrypted message from Trent: {
+                                     decrypted_message}")
+            except Exception as e:
+                self.log_signal.emit(f"Error decrypting message: {e}")
+                return  # Abort if decryption fails
+
+            # Parse the decrypted message
+            try:
+                decrypted_parts = decrypted_message.split(",")
+                received_ra = int(decrypted_parts[0])
+                session_key = int(decrypted_parts[1])
+                encrypted_bob_message = decrypted_parts[2]
+
+                if received_ra == ra:
+                    self.log_signal.emit("Step 3: RA matches. Proceeding...")
+                    self.session_key = session_key
+
+                    # Connect to Bob and send encrypted message
+                    self.connect_to_bob(encrypted_bob_message)
+                else:
+                    self.log_signal.emit("RA mismatch. Aborting protocol.")
+            except Exception as e:
+                self.log_signal.emit(f"Error parsing decrypted message: {e}")
+                return  # Abort if parsing fails
+
+        except Exception as e:
+            self.log_signal.emit(
+                f"Error during Needham-Schroeder protocol: {e}")
+            return  # Abort if there is a general error
+
+    def connect_to_bob(self, encrypted_bob_message):
+        try:
+            self.log_signal.emit("Connecting to Bob...")
+            bob_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            bob_socket.connect(("127.0.0.1", 65433))
+
+            # Send encrypted message to Bob
+            self.log_signal.emit(f"Sending encrypted message to Bob: {
+                                 encrypted_bob_message}")
+            bob_socket.send(encrypted_bob_message.encode())
+
+            # Receive and decrypt RB from Bob
+            encrypted_rb = bob_socket.recv(1024).decode()
+            rb = one_time_pad_decrypt(encrypted_rb, [self.session_key])
+            self.log_signal.emit(f"Received RB from Bob: {rb}")
+
+            # Send RB-1 back to Bob
+            rb_minus_1 = int(rb) - 1
+            encrypted_rb_minus_1 = one_time_pad_encrypt(
+                str(rb_minus_1), [self.session_key])
+            self.log_signal.emit(
+                f"Sending RB-1 to Bob: {encrypted_rb_minus_1}")
+            bob_socket.send(encrypted_rb_minus_1.encode())
+
+            bob_socket.close()
+        except Exception as e:
+            self.log_signal.emit(f"Error during communication with Bob: {e}")
+
+# Alice's GUI Application
 
 
 class AliceApp(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.initUI()
-        self.K_A = ''.join(chr(random.randint(0, 255)) for _ in range(16))
-        self.session_key = None
-        self.log(f"Generated shared secret key K_A: {self.K_A}")
+        self.setWindowTitle("Alice Application")
+        self.setGeometry(100, 100, 600, 400)
 
-    def initUI(self):
-        self.central_widget = QWidget()
-        self.setCentralWidget(self.central_widget)
+        self.log_widget = QTextEdit(self)
+        self.log_widget.setReadOnly(True)
+
+        self.start_button = QPushButton("Start Protocol", self)
+        self.start_button.clicked.connect(self.start_protocol)
 
         layout = QVBoxLayout()
-        self.name_input = QLineEdit(self)
-        self.name_input.setPlaceholderText("Enter Alice's name")
-        layout.addWidget(self.name_input)
-
-        self.bob_name_input = QLineEdit(self)
-        self.bob_name_input.setPlaceholderText("Enter Bob's name")
-        layout.addWidget(self.bob_name_input)
-
-        self.bob_port_input = QLineEdit(self)
-        self.bob_port_input.setPlaceholderText("Enter Bob's port")
-        layout.addWidget(self.bob_port_input)
-
-        self.logs = QTextEdit(self)
-        self.logs.setReadOnly(True)
-        layout.addWidget(self.logs)
-
-        self.start_button = QPushButton('Start Alice', self)
-        self.start_button.clicked.connect(self.start_alice)
+        layout.addWidget(self.log_widget)
         layout.addWidget(self.start_button)
 
-        self.central_widget.setLayout(layout)
+        container = QWidget()
+        container.setLayout(layout)
+        self.setCentralWidget(container)
 
-        self.setWindowTitle('Alice Application')
-        self.setGeometry(100, 100, 400, 300)
+        self.client_thread = AliceClient()
+        self.client_thread.log_signal.connect(
+            lambda msg: log_message(self.log_widget, msg))
 
-    def log(self, message):
-        timestamp = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
-        self.logs.append(f"{timestamp} - {message}")
-
-    def start_alice(self):
-        self.name = self.name_input.text()
-        self.bob_name = self.bob_name_input.text()
-        self.bob_port = int(self.bob_port_input.text())
-        self.log(f"Starting Alice with name: {self.name}, Bob's name: {
-                 self.bob_name}, Bob's port: {self.bob_port}")
-
-        # Generate random number R_A
-        self.R_A = random.randint(1, 10000)
-        self.log(f"Generated random number R_A: {self.R_A}")
-
-        # Connect to Trent
-        self.connect_to_trent()
-
-    def connect_to_trent(self):
-        self.log("Connecting to Trent...")
-        self.trent_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.trent_socket.connect(('localhost', 12345))
-
-        # Send message to Trent
-        message = f"{self.name},{self.bob_name},{self.R_A}"
-        self.log(f"Sending to Trent: {message}")
-        self.trent_socket.send(message.encode())
-
-        # Receive encrypted message from Trent
-        encrypted_message = self.trent_socket.recv(1024).decode()
-        self.log(f"Received from Trent: {encrypted_message}")
-
-        # Decrypt message
-        decrypted_message = one_time_pad_decrypt(encrypted_message, self.K_A)
-        self.log(f"Decrypted message: {decrypted_message}")
-
-        parts = decrypted_message.split(',')
-        R_A_received, B, K, encrypted_message_for_bob = parts
-        self.log(f"Extracted R_A: {R_A_received}, B: {B}, K: {K}")
-
-        # Verify R_A
-        if int(R_A_received) == self.R_A:
-            self.log("R_A matches, session key K is valid.")
-            self.session_key = K
-        else:
-            self.log("R_A does not match, aborting.")
-            self.trent_socket.close()
-            return
-
-        # Send encrypted message to Bob
-        self.connect_to_bob(encrypted_message_for_bob)
-
-    def connect_to_bob(self, encrypted_message_for_bob):
-        self.log("Connecting to Bob...")
-        self.bob_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.bob_socket.connect(('localhost', self.bob_port))
-
-        self.log(f"Sending encrypted message to Bob: {
-                 encrypted_message_for_bob}")
-        self.bob_socket.send(encrypted_message_for_bob.encode())
-
-        # Receive encrypted R_B from Bob
-        encrypted_R_B = self.bob_socket.recv(1024).decode()
-        self.log(f"Received encrypted R_B from Bob: {encrypted_R_B}")
-
-        # Decrypt R_B
-        R_B = one_time_pad_decrypt(encrypted_R_B, self.session_key)
-        self.log(f"Decrypted R_B: {R_B}")
-
-        # Send R_B - 1 to Bob
-        R_B_minus_1 = str(int(R_B) - 1)
-        encrypted_R_B_minus_1 = one_time_pad_encrypt(
-            R_B_minus_1, self.session_key)
-        self.log(f"Sending encrypted R_B - 1 to Bob: {encrypted_R_B_minus_1}")
-        self.bob_socket.send(encrypted_R_B_minus_1.encode())
-
-        # Start message exchange with Bob
-        self.start_message_exchange()
-
-    def start_message_exchange(self):
-        self.log("Starting message exchange with Bob...")
-        self.message_thread = QTimer()
-        self.message_thread.timeout.connect(self.handle_messages)
-        self.message_thread.start(1000)
-
-    def handle_messages(self):
-        try:
-            data = self.bob_socket.recv(1024).decode()
-            if data:
-                decrypted_message = one_time_pad_decrypt(
-                    data, self.session_key)
-                self.log(f"Received from Bob: {decrypted_message}")
-
-                # Echo the message back
-                encrypted_message = one_time_pad_encrypt(
-                    decrypted_message, self.session_key)
-                self.bob_socket.send(encrypted_message.encode())
-                self.log(f"Sent to Bob: {decrypted_message}")
-        except BlockingIOError:
-            pass  # No new message, continue
+    def start_protocol(self):
+        log_message(self.log_widget, "Starting Alice's protocol...")
+        self.client_thread.start()
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     app = QApplication(sys.argv)
-    alice_app = AliceApp()
-    alice_app.show()
+    window = AliceApp()
+    window.show()
     sys.exit(app.exec_())

@@ -1,125 +1,119 @@
 import sys
-import threading
 import socket
 import random
-import time
+import threading
+from PyQt5.QtWidgets import QApplication, QMainWindow, QTextEdit, QPushButton, QVBoxLayout, QWidget
+from PyQt5.QtCore import QThread, pyqtSignal
 from datetime import datetime
-from PyQt5.QtWidgets import (
-    QApplication, QMainWindow, QTextEdit, QVBoxLayout, QWidget, QLabel, QPushButton
-)
-from PyQt5.QtCore import Qt
+
+# Utility functions for logging and encryption
 
 
-# Encryption/Decryption with One-Time Pad
-def otp_encrypt_decrypt(message, key):
-    return ''.join(chr(ord(c) ^ ord(k)) for c, k in zip(message, key))
+def log_message(log_widget, message):
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    log_widget.append(f"[{timestamp}] {message}")
+
+
+def generate_large_prime():
+    # Simple large prime generation (for demonstration purposes only)
+    return random.choice([101, 103, 107, 109, 113, 127, 131, 137, 139, 149])
+
+
+def mod_exp(base, exp, mod):
+    """Perform modular exponentiation."""
+    return pow(base, exp, mod)
+
+# Trent's Main Server Class
+
+
+class TrentServer(QThread):
+    log_signal = pyqtSignal(str)
+
+    def __init__(self):
+        super().__init__()
+        self.server_socket = None
+        self.shared_keys = {}
+
+    def run(self):
+        # Start the server and handle Diffie-Hellman and Needham-Schroeder
+        self.start_server()
+
+    def start_server(self):
+        self.log_signal.emit("Starting Trent's server...")
+        self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.server_socket.bind(("127.0.0.1", 65432))
+        self.server_socket.listen(5)
+        self.log_signal.emit("Server listening on 127.0.0.1:65432")
+
+        while True:
+            client_socket, address = self.server_socket.accept()
+            self.log_signal.emit(f"Connection established with {address}")
+            threading.Thread(target=self.handle_client,
+                             args=(client_socket,)).start()
+
+    def handle_client(self, client_socket):
+        try:
+            # Perform Diffie-Hellman Key Exchange
+            n = generate_large_prime()
+            g = random.randint(2, n - 1)
+
+            private_key = random.randint(2, n - 2)
+            public_key = mod_exp(g, private_key, n)
+
+            client_socket.send(f"{n},{g},{public_key}".encode())
+            self.log_signal.emit(f"Sent n={n}, g={g}, public_key={
+                                 public_key} to client.")
+
+            client_response = client_socket.recv(1024).decode()
+            client_public_key = int(client_response)
+
+            shared_key = mod_exp(client_public_key, private_key, n)
+            self.log_signal.emit(f"Computed shared key: {shared_key}")
+
+            # Receive Needham-Schroeder message
+            data = client_socket.recv(1024).decode()
+            self.log_signal.emit(f"Received: {data}")
+
+            # Process and respond to Needham-Schroeder message
+            client_socket.close()
+        except Exception as e:
+            self.log_signal.emit(f"Error: {e}")
+            client_socket.close()
+
+# Trent's GUI Application
 
 
 class TrentApp(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.init_ui()
-        self.server_socket = None
-        self.client_socket = None
-        self.shared_key_a = None
-        self.shared_key_b = None
-        self.logs = []
-
-    def init_ui(self):
-        self.setWindowTitle("Trent's Application")
+        self.setWindowTitle("Trent Application")
         self.setGeometry(100, 100, 600, 400)
 
-        self.central_widget = QWidget()
-        self.setCentralWidget(self.central_widget)
-        self.layout = QVBoxLayout(self.central_widget)
-
-        self.label = QLabel("Trent's Cryptographic Server", self)
-        self.label.setAlignment(Qt.AlignCenter)
-        self.layout.addWidget(self.label)
-
-        self.log_area = QTextEdit(self)
-        self.log_area.setReadOnly(True)
-        self.layout.addWidget(self.log_area)
+        self.log_widget = QTextEdit(self)
+        self.log_widget.setReadOnly(True)
 
         self.start_button = QPushButton("Start Server", self)
-        self.start_button.clicked.connect(self.start_server_thread)
-        self.layout.addWidget(self.start_button)
+        self.start_button.clicked.connect(self.start_server)
 
-    def log_message(self, message):
-        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        log_entry = f"[{timestamp}] {message}"
-        self.logs.append(log_entry)
-        self.log_area.append(log_entry)
+        layout = QVBoxLayout()
+        layout.addWidget(self.log_widget)
+        layout.addWidget(self.start_button)
 
-    def start_server_thread(self):
-        threading.Thread(target=self.start_server, daemon=True).start()
+        container = QWidget()
+        container.setLayout(layout)
+        self.setCentralWidget(container)
+
+        self.server_thread = TrentServer()
+        self.server_thread.log_signal.connect(
+            lambda msg: log_message(self.log_widget, msg))
 
     def start_server(self):
-        try:
-            # Generate shared keys for Alice (K_A) and Bob (K_B)
-            self.shared_key_a = ''.join(random.choices(
-                'abcdefghijklmnopqrstuvwxyz', k=16))
-            self.shared_key_b = ''.join(random.choices(
-                'abcdefghijklmnopqrstuvwxyz', k=16))
-            self.log_message(f"Generated shared key for Alice (K_A): {
-                             self.shared_key_a}")
-            self.log_message(f"Generated shared key for Bob (K_B): {
-                             self.shared_key_b}")
-
-            # Set up server socket
-            self.server_socket = socket.socket(
-                socket.AF_INET, socket.SOCK_STREAM)
-            self.server_socket.bind(('0.0.0.0', 12345))
-            self.server_socket.listen(1)
-            self.log_message("Server is listening on port 12345...")
-
-            self.client_socket, addr = self.server_socket.accept()
-            self.log_message(f"Connection established with Alice: {addr}")
-
-            # Receive message from Alice (A, B, R_A)
-            data = self.client_socket.recv(1024).decode()
-            self.log_message(f"Received from Alice: {data}")
-            alice_name, bob_name, r_a = data.split(',')
-
-            # Generate session key (K)
-            session_key = ''.join(random.choices(
-                'abcdefghijklmnopqrstuvwxyz', k=16))
-            self.log_message(f"Generated session key (K): {session_key}")
-
-            # Prepare message for Bob
-            bob_message = otp_encrypt_decrypt(
-                f"{session_key},{alice_name}", self.shared_key_b)
-
-            # Encrypt full message for Alice
-            alice_message = otp_encrypt_decrypt(
-                f"{r_a},{bob_name},{session_key},{
-                    bob_message}", self.shared_key_a
-            )
-
-            # Send encrypted message to Alice
-            self.client_socket.send(alice_message.encode())
-            self.log_message(
-                f"Sent encrypted message to Alice: {alice_message}")
-
-            # Close connection
-            self.client_socket.close()
-            self.server_socket.close()
-            self.log_message("Server stopped.")
-
-        except Exception as e:
-            self.log_message(f"Error: {str(e)}")
-            if self.client_socket:
-                self.client_socket.close()
-            if self.server_socket:
-                self.server_socket.close()
-
-
-def main():
-    app = QApplication(sys.argv)
-    trent_app = TrentApp()
-    trent_app.show()
-    sys.exit(app.exec_())
+        log_message(self.log_widget, "Initializing Trent's server...")
+        self.server_thread.start()
 
 
 if __name__ == "__main__":
-    main()
+    app = QApplication(sys.argv)
+    window = TrentApp()
+    window.show()
+    sys.exit(app.exec_())
