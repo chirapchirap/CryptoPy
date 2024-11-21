@@ -1,119 +1,100 @@
-import sys
 import socket
-import random
 import threading
-from PyQt5.QtWidgets import QApplication, QMainWindow, QTextEdit, QPushButton, QVBoxLayout, QWidget
-from PyQt5.QtCore import QThread, pyqtSignal
-from datetime import datetime
+import time
+import base64
+from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QPushButton, QTextEdit
+from PyQt5.QtCore import QTimer
+from PyQt5.QtGui import QFont
+from Crypto.Random import get_random_bytes
 
-# Utility functions for logging and encryption
-
-
-def log_message(log_widget, message):
-    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    log_widget.append(f"[{timestamp}] {message}")
-
-
-def generate_large_prime():
-    # Simple large prime generation (for demonstration purposes only)
-    return random.choice([101, 103, 107, 109, 113, 127, 131, 137, 139, 149])
+K_A = b'1234567890123456'
+K_B = b'abcdefabcdefabcd'
 
 
-def mod_exp(base, exp, mod):
-    """Perform modular exponentiation."""
-    return pow(base, exp, mod)
-
-# Trent's Main Server Class
-
-
-class TrentServer(QThread):
-    log_signal = pyqtSignal(str)
-
+class TrentApp(QWidget):
     def __init__(self):
         super().__init__()
+
+        self.setWindowTitle("Trent")
+        self.setGeometry(300, 300, 400, 300)
+        self.layout = QVBoxLayout()
+        self.text_edit = QTextEdit(self)
+        self.text_edit.setFont(QFont('Courier', 10))
+        self.text_edit.setReadOnly(True)
+        self.layout.addWidget(self.text_edit)
+
+        self.start_button = QPushButton('Start Listening', self)
+        self.start_button.clicked.connect(self.start_listening)
+        self.layout.addWidget(self.start_button)
+
+        self.setLayout(self.layout)
         self.server_socket = None
-        self.shared_keys = {}
+        self.client_socket = None
 
-    def run(self):
-        # Start the server and handle Diffie-Hellman and Needham-Schroeder
-        self.start_server()
+    def log_message(self, message):
+        timestamp = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())
+        self.text_edit.append(f"[{timestamp}] {message}")
 
-    def start_server(self):
-        self.log_signal.emit("Starting Trent's server...")
+    def otp_encrypt(self, key, data):
+        key = key.ljust(len(data), b'\0')
+        return bytes([b ^ k for b, k in zip(data.encode('utf-8'), key)])
+
+    def otp_decrypt(self, key, data):
+        return self.otp_encrypt(key, data)
+
+    def start_listening(self):
+        self.log_message("Трент слушает подключения.")
         self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.server_socket.bind(("127.0.0.1", 65432))
-        self.server_socket.listen(5)
-        self.log_signal.emit("Server listening on 127.0.0.1:65432")
+        self.server_socket.bind(('localhost', 12345))
+        self.server_socket.listen(1)
 
-        while True:
-            client_socket, address = self.server_socket.accept()
-            self.log_signal.emit(f"Connection established with {address}")
-            threading.Thread(target=self.handle_client,
-                             args=(client_socket,)).start()
+        threading.Thread(target=self.accept_connection, daemon=True).start()
 
-    def handle_client(self, client_socket):
-        try:
-            # Perform Diffie-Hellman Key Exchange
-            n = generate_large_prime()
-            g = random.randint(2, n - 1)
+    def accept_connection(self):
+        self.client_socket, address = self.server_socket.accept()
+        self.log_message(f"Подключен {address}")
+        self.handle_client_request()
 
-            private_key = random.randint(2, n - 2)
-            public_key = mod_exp(g, private_key, n)
+    def handle_client_request(self):
+        data = self.client_socket.recv(1024).decode('utf-8')
+        self.log_message(f"Получено от Алисы: {data}")
 
-            client_socket.send(f"{n},{g},{public_key}".encode())
-            self.log_signal.emit(f"Sent n={n}, g={g}, public_key={
-                                 public_key} to client.")
+        if data:
+            A, B, R_A = data.split(',')
+            R_A = int(R_A)
 
-            client_response = client_socket.recv(1024).decode()
-            client_public_key = int(client_response)
+            # Генерация случайного сеансового ключа
+            K = get_random_bytes(16).hex()
 
-            shared_key = mod_exp(client_public_key, private_key, n)
-            self.log_signal.emit(f"Computed shared key: {shared_key}")
+            # Шифруем сообщение для Боба
+            encrypted_msg_1 = self.otp_encrypt(K_B, f"{K},{A}")
+            encrypted_msg_1_base64 = base64.b64encode(
+                encrypted_msg_1).decode('utf-8')
 
-            # Receive Needham-Schroeder message
-            data = client_socket.recv(1024).decode()
-            self.log_signal.emit(f"Received: {data}")
+            # Шифруем сообщение для Алисы
+            encrypted_msg_2 = self.otp_encrypt(
+                K_A, f"{R_A},{B},{K},{encrypted_msg_1_base64}")
 
-            # Process and respond to Needham-Schroeder message
-            client_socket.close()
-        except Exception as e:
-            self.log_signal.emit(f"Error: {e}")
-            client_socket.close()
+            self.client_socket.send(base64.b64encode(
+                encrypted_msg_2).decode('utf-8').encode('utf-8'))
+            self.log_message(f"Отправлено сообщение Алисе: {R_A},{
+                             B},{K},{encrypted_msg_1_base64}.")
 
-# Trent's GUI Application
+            # Закрываем соединение с Алисой
+            self.client_socket.close()
+            self.server_socket.close()
+            self.log_message(f"Трент отключен.")
 
-
-class TrentApp(QMainWindow):
-    def __init__(self):
-        super().__init__()
-        self.setWindowTitle("Trent Application")
-        self.setGeometry(100, 100, 600, 400)
-
-        self.log_widget = QTextEdit(self)
-        self.log_widget.setReadOnly(True)
-
-        self.start_button = QPushButton("Start Server", self)
-        self.start_button.clicked.connect(self.start_server)
-
-        layout = QVBoxLayout()
-        layout.addWidget(self.log_widget)
-        layout.addWidget(self.start_button)
-
-        container = QWidget()
-        container.setLayout(layout)
-        self.setCentralWidget(container)
-
-        self.server_thread = TrentServer()
-        self.server_thread.log_signal.connect(
-            lambda msg: log_message(self.log_widget, msg))
-
-    def start_server(self):
-        log_message(self.log_widget, "Initializing Trent's server...")
-        self.server_thread.start()
+        else:
+            self.log_message("Ошибка получения данных от Алисы.")
 
 
-if __name__ == "__main__":
-    app = QApplication(sys.argv)
+def run_trent():
+    app = QApplication([])
     window = TrentApp()
     window.show()
-    sys.exit(app.exec_())
+    app.exec_()
+
+
+if __name__ == '__main__':
+    run_trent()
