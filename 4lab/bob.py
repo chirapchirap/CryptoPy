@@ -26,6 +26,9 @@ class BobApp(QWidget):
         self.text_edit.setReadOnly(True)
         self.layout.addWidget(self.text_edit)
 
+        self.message_input = QLineEdit(self)
+        self.layout.addWidget(self.message_input)
+
         self.send_button = QPushButton('Отправить сообщение Алисе', self)
         self.send_button.clicked.connect(self.start_listening)
         self.layout.addWidget(self.send_button)
@@ -73,24 +76,24 @@ class BobApp(QWidget):
                     K.encode('utf-8'), message)
                 message_to_send = base64.b64encode(
                     encrypted_message).decode('utf-8')
-                self.log_signal.emit(f"Сообщение {message} зашифровано перед отправкой: {
-                    message_to_send}.")
+                # self.log_signal.emit(f"Сообщение {message} зашифровано перед отправкой: {
+                #     message_to_send}.")
             else:
                 # Отправляем сообщение без шифрования
                 message_to_send = message
-                self.log_signal.emit(f"Сообщение {message} готово к отправке.")
+                # self.log_signal.emit(f"Сообщение {message} готово к отправке.")
 
             # Отправляем сообщение
             self.client_socket.send(message_to_send.encode('utf-8'))
-            self.log_signal.emit("Сообщение успешно отправлено Алисе.")
+            # self.log_signal.emit("Сообщение успешно отправлено Алисе.")
 
             # Ждем ответ от Алисы
             self.log_signal.emit("Ожидание ответа от Алисы...")
             while True:
                 encrypted_response = self.client_socket.recv(1024)
                 if encrypted_response:
-                    self.log_signal.emit(f"Получено зашифрованное сообщение от Алисы: {
-                        encrypted_response.decode('utf-8')}")
+                    # self.log_signal.emit(f"Получено зашифрованное сообщение от Алисы: {
+                    #     encrypted_response.decode('utf-8')}")
                     return encrypted_response
                 else:
                     self.log_signal.emit(
@@ -131,7 +134,8 @@ class BobApp(QWidget):
             encrypted_response = self.get_trent_message()
             self.log_signal.emit(
                 f"Получено сообщение, которое Трент зашифровал для Боба и отправил Алисе: {encrypted_response}")
-            decrypted_response = self.decrypt_response(encrypted_response, K_B)
+            decrypted_response = self.decrypt_response(
+                encrypted_response, K_B.decode('utf-8'))
             K, A = decrypted_response.split(',')
             self.log_signal.emit(
                 f"Расшифрованно сообщение, которое Трент зашифровал для Боба и отправил Алисе: K: {K}, A: {A}")
@@ -148,7 +152,7 @@ class BobApp(QWidget):
                                  encrypted_response}")
             decrypted_response = self.decrypt_response(encrypted_response, K)
             self.log_signal.emit(f"Расшифрованно R_B-1: {
-                                 decrypted_response.decode('utf-8')}")
+                                 decrypted_response}")
         except Exception as e:
             self.log_signal.emit(
                 f"Ошибка при отправке сообщения Алисе и получении ответа от Боба: {e}")
@@ -162,7 +166,7 @@ class BobApp(QWidget):
                                  encrypted_response}")
             decrypted_response = self.decrypt_response(encrypted_response, K)
             self.log_signal.emit(f"Алиса (расшифрованное сообщение): {
-                                 decrypted_response.decode('utf-8')}")
+                                 decrypted_response}")
         except Exception as e:
             self.log_signal.emit(
                 f"Ошибка при отправке сообщения Алисе и получении ответа от Алисы: {e}")
@@ -187,7 +191,7 @@ class BobApp(QWidget):
                                  encrypted_response}")
             decrypted_response = self.decrypt_response(encrypted_response, K)
             self.log_signal.emit(f"Алиса (расшифрованное сообщение): {
-                                 decrypted_response.decode('utf-8')}")
+                                 decrypted_response}")
         except Exception as e:
             self.log_signal.emit(
                 f"Ошибка при отправке сообщения Алисе и получении ответа от Алисы: {e}")
