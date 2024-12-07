@@ -42,6 +42,7 @@ class AliceApp(QWidget):
         self.client_socket = None
         self.session_key = None
         self.trent_socket = None
+        self.bob_socket = None
 
         # Connect the signal to the log_message method
         self.log_signal.connect(self.log_message)
@@ -112,24 +113,24 @@ class AliceApp(QWidget):
                     K.encode('utf-8'), message)
                 message_to_send = base64.b64encode(
                     encrypted_message).decode('utf-8')
-                self.log_signal.emit(f"Сообщение {message} зашифровано перед отправкой: {
-                    message_to_send}.")
+                # self.log_signal.emit(f"Сообщение {message} зашифровано перед отправкой: {
+                #     message_to_send}.")
             else:
                 # Отправляем сообщение без шифрования
                 message_to_send = message
-                self.log_signal.emit(f"Сообщение {message} готово к отправке.")
+                # self.log_signal.emit(f"Сообщение {message} готово к отправке.")
 
             # Отправляем сообщение
             self.bob_socket.send(message_to_send.encode('utf-8'))
-            self.log_signal.emit("Сообщение успешно отправлено Бобу.")
+            # self.log_signal.emit("Сообщение успешно отправлено Бобу.")
 
             # Ждем ответ от Боба
             self.log_signal.emit("Ожидание ответа от Боба...")
             while True:
                 encrypted_response = self.bob_socket.recv(1024)
                 if encrypted_response:
-                    self.log_signal.emit(f"Получено зашифрованное сообщение от Боба: {
-                        encrypted_response.decode('utf-8')}")
+                    # self.log_signal.emit(f"Получено зашифрованное сообщение от Боба: {
+                    #     encrypted_response.decode('utf-8')}")
                     return encrypted_response
                 else:
                     self.log_signal.emit(
@@ -148,6 +149,22 @@ class AliceApp(QWidget):
         except Exception as e:
             self.log_signal.emit(f"Ошибка при расшифровании сообщения: {e}")
             return None
+
+    def connect_to_bob(self):
+        """Метод для подключения к Бобу на порт 12347, выполняется в потоке."""
+        # def worker():
+        self.log_signal.emit("Подключаюсь к Бобу на порт 12347...")
+
+        self.bob_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        try:
+            self.bob_socket.connect(('localhost', 12347))  # Порт Боба
+            self.log_signal.emit("Подключено к Бобу.")
+        except Exception as e:
+            self.log_signal.emit(f"Ошибка подключения к Бобу: {e}")
+
+        # # Запуск потока для подключения
+        # connection_thread = threading.Thread(target=worker, daemon=True)
+        # connection_thread.start()
 
     def handle_trent_response(self, data):
         """Обработка ответа от Трента"""
@@ -199,7 +216,7 @@ class AliceApp(QWidget):
             decrypted_response = self.decrypt_response(
                 encrypted_response, self.K)
             self.log_signal.emit(f"Расшифрованное сообщение R_B от Боба: {
-                                 decrypted_response.decode('utf-8')}")
+                                 decrypted_response}")
         except Exception as e:
             self.log_signal.emit(f"Ошибка извлечения данных из сообщения: {e}")
             return
@@ -219,7 +236,7 @@ class AliceApp(QWidget):
             decrypted_response = self.decrypt_response(
                 encrypted_response, self.K)
             self.log_signal.emit(f"Боб: {
-                                 decrypted_response.decode('utf-8')}")
+                                 decrypted_response}")
         except Exception as e:
             self.log_signal.emit(f"Ошибка при отправке R_B-1 Бобу: {e}")
 
@@ -233,26 +250,10 @@ class AliceApp(QWidget):
             decrypted_response = self.decrypt_response(
                 encrypted_response, self.K)
             self.log_signal.emit(f"Боб (расшифрованное сообщение): {
-                                 decrypted_response.decode('utf-8')}")
+                                 decrypted_response}")
         except Exception as e:
             self.log_signal.emit(
                 f"Ошибка при отправке сообщения Бобу и получении ответа от Боба: {e}")
-
-    def connect_to_bob(self):
-        """Метод для подключения к Бобу на порт 12347, выполняется в потоке."""
-        def worker():
-            self.log_signal.emit("Подключаюсь к Бобу на порт 12347...")
-
-            self.bob_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            try:
-                self.bob_socket.connect(('localhost', 12347))  # Порт Боба
-                self.log_signal.emit("Подключено к Бобу.")
-            except Exception as e:
-                self.log_signal.emit(f"Ошибка подключения к Бобу: {e}")
-
-        # Запуск потока для подключения
-        connection_thread = threading.Thread(target=worker, daemon=True)
-        connection_thread.start()
 
     # def receive_message_from_bob(self):
     #     """Метод для получения сообщения от Боба, выполняется в потоке."""
