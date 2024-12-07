@@ -7,8 +7,8 @@ from PyQt5.QtCore import QTimer
 from PyQt5.QtGui import QFont
 from Crypto.Random import get_random_bytes
 
-K_A = b'1234567890123456'
-K_B = b'abcdefabcdefabcd'
+K_A = b'1010001000110110'
+K_B = b'1010101000101010'
 
 
 class TrentApp(QWidget):
